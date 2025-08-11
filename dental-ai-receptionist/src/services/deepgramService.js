@@ -10,10 +10,16 @@ class DeepgramService {
 
   initialize() {
     const apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY;
-    console.log('Initializing Deepgram with API key:', apiKey ? 'Present' : 'Missing');
+    console.log('Initializing Deepgram with API key:', apiKey ? `${apiKey.substring(0, 10)}...` : 'Missing');
+    console.log('Full environment check:', {
+      hasApiKey: !!apiKey,
+      apiKeyLength: apiKey?.length,
+      envMode: import.meta.env.MODE
+    });
     
-    if (!apiKey) {
-      throw new Error('Deepgram API key is not configured');
+    if (!apiKey || apiKey === 'your-deepgram-api-key-here') {
+      console.error('❌ Deepgram API key is not configured or is still placeholder');
+      throw new Error('Deepgram API key is not configured. Please add your API key to the .env file');
     }
     
     this.client = createClient(apiKey);
@@ -83,8 +89,24 @@ class DeepgramService {
 
       // Handle errors
       this.connection.on('error', (error) => {
-        console.error('❌ Deepgram error:', error);
-        if (onError) onError(error);
+        console.error('❌ Deepgram WebSocket error:', error);
+        console.error('Error details:', {
+          message: error.message,
+          code: error.code,
+          type: error.type,
+          status: error.status
+        });
+        
+        // Check for specific error types
+        if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+          console.error('❌ API Key authentication failed. Please check your Deepgram API key.');
+          if (onError) onError(new Error('Invalid Deepgram API key. Please check your credentials.'));
+        } else if (error.message?.includes('WebSocket')) {
+          console.error('❌ WebSocket connection failed. Check network and firewall settings.');
+          if (onError) onError(new Error('Failed to connect to Deepgram. Please check your connection.'));
+        } else {
+          if (onError) onError(error);
+        }
       });
 
       // Handle connection close

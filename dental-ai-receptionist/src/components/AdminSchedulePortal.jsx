@@ -316,7 +316,13 @@ const AdminSchedulePortal = () => {
                     )}
                     <div className="text-center">
                       <p className="text-xs text-green-600">
-                        {daySchedule?.slots?.filter(s => s.available).length || 0} slots
+                        {daySchedule?.slots?.filter(s => s.available).length || 
+                         generateTimeSlots(
+                           daySchedule?.start || defaultDaySchedule.start, 
+                           daySchedule?.end || defaultDaySchedule.end,
+                           30,
+                           true
+                         ).length} slots
                       </p>
                     </div>
                   </div>
@@ -578,93 +584,116 @@ const AdminSchedulePortal = () => {
   };
 
   const TemplateSettings = () => (
-    <div
-      className="bg-white rounded-lg shadow-lg p-6"
-    >
+    <div>
       <h3 className="text-lg font-semibold mb-4">Default Schedule Template</h3>
       
-      <div className="space-y-4">
-        {Object.entries(defaultSchedule).map(([day, schedule]) => (
-          <div key={day} className="flex items-center space-x-4 p-3 border rounded-lg">
-            <label className="flex items-center w-32">
-              <input
-                type="checkbox"
-                checked={schedule.enabled}
-                onChange={(e) => {
-                  setDefaultSchedule(prev => ({
-                    ...prev,
-                    [day]: { ...prev[day], enabled: e.target.checked }
-                  }));
-                }}
-                className="mr-2"
-              />
-              <span className="capitalize font-medium">{day}</span>
-            </label>
-            
-            {schedule.enabled && (
-              <>
-                <input
-                  type="time"
-                  value={schedule.start}
-                  onChange={(e) => {
-                    setDefaultSchedule(prev => ({
-                      ...prev,
-                      [day]: { ...prev[day], start: e.target.value }
-                    }));
-                  }}
-                  className="px-2 py-1 border border-gray-300 rounded"
-                />
-                <span>to</span>
-                <input
-                  type="time"
-                  value={schedule.end}
-                  onChange={(e) => {
-                    setDefaultSchedule(prev => ({
-                      ...prev,
-                      [day]: { ...prev[day], end: e.target.value }
-                    }));
-                  }}
-                  className="px-2 py-1 border border-gray-300 rounded"
-                />
-                
-                {schedule.lunch && (
-                  <>
-                    <Coffee className="w-4 h-4 text-gray-400" />
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Day</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Working Hours</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lunch Break</th>
+              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Slots</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {Object.entries(defaultSchedule).map(([day, schedule]) => (
+              <tr key={day} className={!schedule.enabled ? 'opacity-50' : ''}>
+                <td className="px-3 py-3">
+                  <label className="flex items-center">
                     <input
-                      type="time"
-                      value={schedule.lunch.start}
+                      type="checkbox"
+                      checked={schedule.enabled}
                       onChange={(e) => {
                         setDefaultSchedule(prev => ({
                           ...prev,
-                          [day]: { 
-                            ...prev[day], 
-                            lunch: { ...prev[day].lunch, start: e.target.value }
-                          }
+                          [day]: { ...prev[day], enabled: e.target.checked }
                         }));
                       }}
-                      className="px-2 py-1 border border-gray-300 rounded"
+                      className="mr-2"
                     />
-                    <span>to</span>
-                    <input
-                      type="time"
-                      value={schedule.lunch.end}
-                      onChange={(e) => {
-                        setDefaultSchedule(prev => ({
-                          ...prev,
-                          [day]: { 
-                            ...prev[day], 
-                            lunch: { ...prev[day].lunch, end: e.target.value }
-                          }
-                        }));
-                      }}
-                      className="px-2 py-1 border border-gray-300 rounded"
-                    />
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        ))}
+                    <span className="capitalize font-medium text-sm">{day}</span>
+                  </label>
+                </td>
+                <td className="px-3 py-3">
+                  {schedule.enabled ? (
+                    <div className="flex items-center space-x-1">
+                      <input
+                        type="time"
+                        value={schedule.start}
+                        onChange={(e) => {
+                          setDefaultSchedule(prev => ({
+                            ...prev,
+                            [day]: { ...prev[day], start: e.target.value }
+                          }));
+                        }}
+                        className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      />
+                      <span className="text-sm">-</span>
+                      <input
+                        type="time"
+                        value={schedule.end}
+                        onChange={(e) => {
+                          setDefaultSchedule(prev => ({
+                            ...prev,
+                            [day]: { ...prev[day], end: e.target.value }
+                          }));
+                        }}
+                        className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-400">Closed</span>
+                  )}
+                </td>
+                <td className="px-3 py-3">
+                  {schedule.enabled && schedule.lunch ? (
+                    <div className="flex items-center space-x-1">
+                      <Coffee className="w-4 h-4 text-gray-400" />
+                      <input
+                        type="time"
+                        value={schedule.lunch.start}
+                        onChange={(e) => {
+                          setDefaultSchedule(prev => ({
+                            ...prev,
+                            [day]: { 
+                              ...prev[day], 
+                              lunch: { ...prev[day].lunch, start: e.target.value }
+                            }
+                          }));
+                        }}
+                        className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      />
+                      <span className="text-sm">-</span>
+                      <input
+                        type="time"
+                        value={schedule.lunch.end}
+                        onChange={(e) => {
+                          setDefaultSchedule(prev => ({
+                            ...prev,
+                            [day]: { 
+                              ...prev[day], 
+                              lunch: { ...prev[day].lunch, end: e.target.value }
+                            }
+                          }));
+                        }}
+                        className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-400">-</span>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-center">
+                  <span className="text-sm font-medium text-green-600">
+                    {schedule.enabled ? generateTimeSlots(schedule.start, schedule.end, 30, true).length : 0}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="mt-6 flex space-x-3">
@@ -757,34 +786,33 @@ const AdminSchedulePortal = () => {
         {/* Day Detail View - shown when a date is selected */}
         {selectedDate && <DayDetailView />}
         
-        {/* Bottom Grid for Template and Holidays */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Template Settings */}
+        {/* Bottom Section - Template Settings */}
+        <div className="bg-white rounded-lg shadow-lg p-6">
           <TemplateSettings />
-          
-          {/* Holidays List */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h3 className="text-lg font-semibold mb-4">Upcoming Holidays</h3>
-            <div className="space-y-2">
-              {holidays.length === 0 ? (
-                <p className="text-sm text-gray-500">No holidays scheduled</p>
-              ) : (
-                holidays.map((holiday, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 bg-red-50 rounded">
-                    <div>
-                      <p className="text-sm font-medium">{holiday.name}</p>
-                      <p className="text-xs text-gray-600">{holiday.date}</p>
-                    </div>
-                    <button
-                      onClick={() => setHolidays(prev => prev.filter((_, i) => i !== index))}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+        </div>
+        
+        {/* Holidays Section - Full width but with max height */}
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <h3 className="text-lg font-semibold mb-4">Upcoming Holidays</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {holidays.length === 0 ? (
+              <p className="text-sm text-gray-500 col-span-full">No holidays scheduled</p>
+            ) : (
+              holidays.map((holiday, index) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{holiday.name}</p>
+                    <p className="text-xs text-gray-600">{holiday.date}</p>
                   </div>
-                ))
-              )}
-            </div>
+                  <button
+                    onClick={() => setHolidays(prev => prev.filter((_, i) => i !== index))}
+                    className="ml-2 text-red-600 hover:text-red-700 flex-shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

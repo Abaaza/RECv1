@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import Calendar from 'react-calendar';
 import { format } from 'date-fns';
-import { Calendar as CalendarIcon, Clock, User, Phone, Mail, FileText } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, User, Phone, Mail, FileText, List, Grid } from 'lucide-react';
 import appointmentService from '../services/appointmentService';
+import AppointmentsList from './AppointmentsList';
 import 'react-calendar/dist/Calendar.css';
 
 const AppointmentCalendar = ({ onAppointmentBooked }) => {
+  const [viewMode, setViewMode] = useState('list'); // 'calendar' or 'list'
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [availableSlots, setAvailableSlots] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -118,12 +120,41 @@ const AppointmentCalendar = ({ onAppointmentBooked }) => {
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-        <CalendarIcon className="w-6 h-6 mr-2" />
-        Appointment Calendar
-      </h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+          <CalendarIcon className="w-6 h-6 mr-2" />
+          Appointments
+        </h2>
+        <div className="flex space-x-2">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`px-4 py-2 rounded-lg flex items-center space-x-2 ${
+              viewMode === 'list' 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            <List className="w-4 h-4" />
+            <span>List View</span>
+          </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={`px-4 py-2 rounded-lg flex items-center space-x-2 ${
+              viewMode === 'calendar' 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            <Grid className="w-4 h-4" />
+            <span>Calendar View</span>
+          </button>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {viewMode === 'list' ? (
+        <AppointmentsList />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Calendar */}
         <div>
           <Calendar
@@ -165,12 +196,20 @@ const AppointmentCalendar = ({ onAppointmentBooked }) => {
             <div className="mb-4">
               <h4 className="text-sm font-medium text-gray-600 mb-2">Scheduled Appointments</h4>
               <div className="space-y-2">
-                {appointments.map(apt => (
-                  <div key={apt.id} className="bg-blue-50 p-3 rounded-lg text-sm">
+                {appointments.map((apt, idx) => (
+                  <div key={apt._id || idx} className="bg-blue-50 p-3 rounded-lg text-sm border border-blue-200">
                     <div className="font-medium text-blue-900">
-                      {format(new Date(apt.startTime), 'h:mm a')} - {apt.appointmentType}
+                      {apt.startTime} - {apt.endTime} | {apt.type?.toUpperCase() || 'APPOINTMENT'}
                     </div>
-                    <div className="text-gray-700">{apt.patientName}</div>
+                    {apt.confirmationNumber && (
+                      <div className="text-xs text-gray-600">Confirmation: {apt.confirmationNumber}</div>
+                    )}
+                    {apt.patientId && (
+                      <div className="text-gray-700">
+                        {apt.patientId.profile?.firstName || 'Patient'} {apt.patientId.profile?.lastName || ''}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-1">Status: {apt.status}</div>
                   </div>
                 ))}
               </div>
@@ -200,10 +239,9 @@ const AppointmentCalendar = ({ onAppointmentBooked }) => {
             )}
           </div>
         </div>
-      </div>
-
-      {/* Booking Form */}
-      {showBookingForm && selectedSlot && (
+        
+        {/* Booking Form */}
+        {showBookingForm && selectedSlot && (
         <div className="mt-6 border-t pt-6">
           <h3 className="text-lg font-semibold text-gray-700 mb-4">
             Book Appointment for {selectedSlot.display}
@@ -289,6 +327,8 @@ const AppointmentCalendar = ({ onAppointmentBooked }) => {
             </div>
           </form>
         </div>
+        )}
+      </div>
       )}
     </div>
   );

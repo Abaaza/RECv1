@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 
 const appointmentSchema = new mongoose.Schema({
+  confirmationNumber: {
+    type: String,
+    unique: true,
+    required: true
+  },
   patientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -103,6 +108,7 @@ appointmentSchema.index({ date: 1, startTime: 1 });
 appointmentSchema.index({ patientId: 1, date: -1 });
 appointmentSchema.index({ dentistId: 1, date: 1 });
 appointmentSchema.index({ status: 1 });
+appointmentSchema.index({ confirmationNumber: 1 });
 
 appointmentSchema.pre('save', function(next) {
   this.updatedAt = Date.now();

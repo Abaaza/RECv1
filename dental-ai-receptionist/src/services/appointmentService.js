@@ -167,7 +167,15 @@ class AppointmentService {
     await this.loadAppointments();
     
     return this.appointments.filter(apt => {
-      const aptDate = typeof apt.startTime === 'string' ? parseISO(apt.startTime) : apt.startTime;
+      // Handle both date field and startTime field formats
+      let aptDate;
+      if (apt.date) {
+        aptDate = typeof apt.date === 'string' ? parseISO(apt.date) : apt.date;
+      } else if (apt.startTime) {
+        aptDate = typeof apt.startTime === 'string' ? parseISO(apt.startTime) : apt.startTime;
+      } else {
+        return false;
+      }
       return isSameDay(aptDate, date) && apt.status !== 'cancelled';
     });
   }

@@ -127,7 +127,7 @@ router.get('/', async (req, res) => {
       // Count appointments for this hour across the month
       const appointmentsAtHour = await Appointment.countDocuments({
         date: { $gte: thisMonth },
-        time: { $regex: `^${hour.toString().padStart(2, '0')}:` }
+        startTime: { $regex: `^${hour.toString().padStart(2, '0')}:` }
       });
       
       const callsAtHour = Math.floor(appointmentsAtHour * 1.2); // Estimate calls

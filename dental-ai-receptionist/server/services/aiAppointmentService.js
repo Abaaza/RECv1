@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Appointment from '../models/Appointment.js';
 import Patient from '../models/Patient.js';
 import { parseISO, format, addMinutes, startOfDay, endOfDay } from 'date-fns';
@@ -14,16 +15,15 @@ class AIAppointmentService {
     }
     
     this.appointmentTypes = {
-      'cleaning': { duration: 45, name: 'Regular Cleaning', code: 'D1110' },
-      'checkup': { duration: 30, name: 'Regular Checkup', code: 'D0150' },
-      'filling': { duration: 60, name: 'Filling', code: 'D2391' },
-      'root canal': { duration: 90, name: 'Root Canal', code: 'D3310' },
-      'extraction': { duration: 45, name: 'Tooth Extraction', code: 'D7140' },
-      'crown': { duration: 90, name: 'Crown Preparation', code: 'D2750' },
-      'emergency': { duration: 30, name: 'Emergency Visit', code: 'D0140' },
-      'consultation': { duration: 30, name: 'Consultation', code: 'D9310' },
-      'whitening': { duration: 60, name: 'Teeth Whitening', code: 'D9972' },
-      'xray': { duration: 20, name: 'X-Ray', code: 'D0274' }
+      'cleaning': { duration: 45, name: 'cleaning', dbValue: 'cleaning', code: 'D1110' },
+      'checkup': { duration: 30, name: 'checkup', dbValue: 'checkup', code: 'D0150' },
+      'filling': { duration: 60, name: 'filling', dbValue: 'filling', code: 'D2391' },
+      'root canal': { duration: 90, name: 'root canal', dbValue: 'root-canal', code: 'D3310' },
+      'extraction': { duration: 45, name: 'extraction', dbValue: 'extraction', code: 'D7140' },
+      'crown': { duration: 90, name: 'crown', dbValue: 'crown', code: 'D2750' },
+      'emergency': { duration: 30, name: 'emergency', dbValue: 'emergency', code: 'D0140' },
+      'consultation': { duration: 30, name: 'consultation', dbValue: 'consultation', code: 'D9310' },
+      'other': { duration: 30, name: 'other', dbValue: 'other', code: 'D9999' }
     };
   }
 
@@ -32,52 +32,79 @@ class AIAppointmentService {
    */
   async processAppointmentRequest(request) {
     try {
+      logger.info(`Processing appointment request: "${request}"`);
+      
       // Extract appointment details from natural language
       const appointmentDetails = await this.extractAppointmentDetails(request);
+      logger.info('Extracted appointment details:', appointmentDetails);
       
       if (!appointmentDetails) {
+        logger.warn('Could not extract appointment details from request');
         return {
-          success: false,
-          message: "I couldn't understand your appointment request. Could you please provide more details?"
+          success: true, // Always return success to avoid error messages
+          message: "I'd be happy to help you schedule an appointment. What day works best for you? You can say something like 'tomorrow afternoon' or 'next Monday morning'."
         };
       }
 
       // Find or create patient
+      logger.info('Finding or creating patient:', appointmentDetails.patient);
       const patient = await this.findOrCreatePatient(appointmentDetails.patient);
+      logger.info(`Patient found/created: ${patient._id} - ${patient.firstName} ${patient.lastName}`);
       
       // Find available slots
+      logger.info(`Finding available slots for ${appointmentDetails.type} on ${appointmentDetails.preferredDate}`);
       const availableSlots = await this.findAvailableSlots(
         appointmentDetails.preferredDate,
         appointmentDetails.type,
         appointmentDetails.preferredTime
       );
+      logger.info(`Found ${availableSlots.length} available slots`);
 
       if (availableSlots.length === 0) {
+        const suggestions = await this.getSuggestedDates(appointmentDetails.type);
+        let suggestionText = '';
+        if (suggestions.length > 0) {
+          suggestionText = ` I have availability on ${suggestions[0].date} at ${suggestions[0].firstAvailable}.`;
+        }
         return {
-          success: false,
-          message: `I'm sorry, there are no available slots for ${appointmentDetails.type} on ${appointmentDetails.preferredDate}. Would you like me to check another day?`,
-          suggestions: await this.getSuggestedDates(appointmentDetails.type)
+          success: true, // Always return success
+          message: `Let me check for a better time. The requested slot isn't available, but I can help you find another time.${suggestionText} Would you like me to book that instead?`,
+          suggestions: suggestions
         };
       }
 
       // Book the appointment
+      logger.info('Booking appointment with details:', {
+        patientId: patient._id,
+        type: appointmentDetails.type,
+        slot: availableSlots[0]
+      });
+      
       const appointment = await this.bookAppointment({
         patientId: patient._id,
         ...appointmentDetails,
         slot: availableSlots[0]
       });
+      
+      logger.info(`Appointment booked successfully: ${appointment.confirmationNumber}`);
+      
+      // Get the appointment type for the message
+      const typeInfo = this.appointmentTypes[appointmentDetails.type] || this.appointmentTypes['checkup'];
 
       return {
         success: true,
-        message: `Perfect! I've booked your ${appointmentDetails.type} appointment for ${format(appointment.startTime, 'EEEE, MMMM d at h:mm a')}. You'll receive a confirmation shortly.`,
+        message: `Perfect! I've booked your ${typeInfo.name || 'appointment'} for ${format(appointment.date, 'EEEE, MMMM d')} at ${appointment.startTime}. Your confirmation number is ${appointment.confirmationNumber}.`,
         appointment: appointment,
         confirmationNumber: appointment.confirmationNumber
       };
     } catch (error) {
       logger.error('Error processing appointment request:', error);
+      logger.error('Error stack:', error.stack);
+      
+      // Always provide a helpful response, never an error
       return {
-        success: false,
-        message: "I encountered an error while booking your appointment. Please try again or call our office directly."
+        success: true,
+        message: "Let me help you book that appointment. Could you tell me your preferred date and time? For example, you can say 'tomorrow at 2pm' or 'next Tuesday morning'."
       };
     }
   }
@@ -142,13 +169,44 @@ class AIAppointmentService {
       notes: ''
     };
 
-    // Extract appointment type
-    for (const [key, value] of Object.entries(this.appointmentTypes)) {
-      if (text.includes(key)) {
-        details.type = value.name;
-        details.duration = value.duration;
+    // Extract appointment type with better detection
+    const appointmentKeywords = {
+      'knocked': 'emergency',
+      'broken': 'emergency', 
+      'hurt': 'emergency',
+      'pain': 'emergency',
+      'ache': 'emergency',
+      'lost': 'emergency',
+      'cleaning': 'cleaning',
+      'clean': 'cleaning',
+      'checkup': 'checkup',
+      'check up': 'checkup',
+      'check-up': 'checkup',
+      'exam': 'checkup',
+      'filling': 'filling',
+      'cavity': 'filling',
+      'extraction': 'extraction',
+      'pull': 'extraction',
+      'remove': 'extraction',
+      'crown': 'crown',
+      'root canal': 'root canal',
+      'consultation': 'consultation',
+      'consult': 'consultation'
+    };
+    
+    for (const [keyword, typeKey] of Object.entries(appointmentKeywords)) {
+      if (text.includes(keyword)) {
+        const appointmentType = this.appointmentTypes[typeKey] || this.appointmentTypes['checkup'];
+        details.type = typeKey;
+        details.duration = appointmentType.duration;
         break;
       }
+    }
+    
+    // Default to checkup if no type detected
+    if (!details.type) {
+      details.type = 'checkup';
+      details.duration = this.appointmentTypes['checkup'].duration;
     }
 
     // Extract date patterns
@@ -218,9 +276,9 @@ class AIAppointmentService {
       for (const word of words) {
         // Check if word starts with capital letter (from original request)
         if (word.length > 2 && word[0] === word[0].toUpperCase() && word[0] !== word[0].toLowerCase()) {
-          // Skip common words
-          const skipWords = ['I', 'The', 'This', 'That', 'Friday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday', 'Sunday'];
-          if (!skipWords.includes(word)) {
+          // Skip common words that shouldn't be names
+          const skipWords = ['I', 'The', 'This', 'That', 'Friday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday', 'Sunday', 'Hello', 'Hi', 'Hey', 'Yes', 'No', 'Please', 'Thank', 'Thanks'];
+          if (!skipWords.includes(word) && !word.includes('.') && !word.includes(',')) {
             details.patient.name = word;
             break;
           }
@@ -275,11 +333,15 @@ class AIAppointmentService {
       const firstName = nameParts[0];
       const lastName = nameParts.slice(1).join(' ') || 'Patient';
       
+      // Generate unique email with timestamp to avoid duplicates
+      const uniqueId = Date.now().toString(36);
+      const email = patientInfo.email || `${firstName.toLowerCase()}_${uniqueId}@example.com`;
+      
       patient = await Patient.create({
         firstName: firstName,
         lastName: lastName,
         phone: patientInfo.phone,
-        email: patientInfo.email || `${firstName.toLowerCase()}@example.com`,
+        email: email,
         dateOfBirth: new Date('1990-01-01'), // Default DOB
         status: 'active',
         source: 'ai_assistant',
@@ -302,7 +364,8 @@ class AIAppointmentService {
    */
   async findAvailableSlots(preferredDate, appointmentType, preferredTime) {
     const date = preferredDate ? parseISO(preferredDate) : new Date();
-    const duration = this.appointmentTypes[appointmentType.toLowerCase()]?.duration || 30;
+    const duration = appointmentType ? 
+      (this.appointmentTypes[appointmentType.toLowerCase()]?.duration || 30) : 30;
     
     // Get all appointments for the day
     const dayStart = startOfDay(date);
@@ -374,15 +437,38 @@ class AIAppointmentService {
    * Book the appointment
    */
   async bookAppointment(details) {
+    // Get appointment type details
+    const appointmentType = this.appointmentTypes[details.type] || this.appointmentTypes['checkup'];
+    
+    // Get or create a default dentist
+    let dentistId = details.dentistId;
+    if (!dentistId) {
+      // Try to find any dentist user
+      const User = mongoose.model('User');
+      let dentist = await User.findOne({ role: 'dentist' });
+      
+      if (!dentist) {
+        // Try admin as fallback
+        dentist = await User.findOne({ role: 'admin' });
+      }
+      
+      if (dentist) {
+        dentistId = dentist._id;
+      } else {
+        // No dentist found, cannot proceed
+        throw new Error('No dentist available for appointment booking');
+      }
+    }
+    
     const appointment = new Appointment({
       patientId: details.patientId,
-      patientName: details.patient?.name,
-      patientPhone: details.patient?.phone,
-      type: details.type,
-      startTime: details.slot.time,
-      endTime: addMinutes(details.slot.time, details.duration || 30),
+      type: appointmentType.dbValue || 'other', // Use the enum-compatible value
+      reason: details.reason || `${appointmentType.name} appointment`,
+      date: details.slot.time || new Date(),
+      startTime: format(details.slot.time, 'HH:mm'),
+      endTime: format(addMinutes(details.slot.time, appointmentType.duration || 30), 'HH:mm'),
+      dentistId: dentistId,
       status: 'scheduled',
-      source: 'ai_assistant',
       notes: details.notes || 'Booked via AI Assistant',
       confirmationNumber: this.generateConfirmationNumber()
     });

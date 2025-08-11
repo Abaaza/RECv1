@@ -27,12 +27,12 @@ function App() {
   const [user, setUser] = useState(null);
   
   const [stats, setStats] = useState({
-    totalCalls: 127,
-    todayAppointments: 12,
-    avgResponseTime: '0.8s',
-    satisfaction: 98,
-    activePatients: 1847,
-    emergencyHandled: 3
+    totalCalls: 0,
+    todayAppointments: 0,
+    avgResponseTime: '0s',
+    satisfaction: 0,
+    activePatients: 0,
+    emergencyHandled: 0
   });
 
   useEffect(() => {
@@ -48,7 +48,30 @@ function App() {
       setIsAuthenticated(true);
     }
     
-    return () => clearInterval(timer);
+    // Fetch real stats
+    const fetchStats = async () => {
+      try {
+        const data = await apiService.getStats();
+        setStats({
+          totalCalls: data.callsAnswered || 0,
+          todayAppointments: data.todayAppointments || 0,
+          avgResponseTime: `${data.averageWaitTime || 0}m`,
+          satisfaction: data.patientSatisfaction || 0,
+          activePatients: data.totalPatients || 0,
+          emergencyHandled: data.emergenciesHandled || 0
+        });
+      } catch (error) {
+        console.error('Failed to fetch stats:', error);
+      }
+    };
+    
+    fetchStats();
+    const statsInterval = setInterval(fetchStats, 30000); // Refresh every 30 seconds
+    
+    return () => {
+      clearInterval(timer);
+      clearInterval(statsInterval);
+    };
   }, []);
 
   const handleLoginSuccess = (userData) => {

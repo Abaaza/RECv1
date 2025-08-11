@@ -21,10 +21,13 @@ router.get('/', async (req, res) => {
     const { date, status, dentistId } = req.query;
     const query = {};
 
-    if (req.user.role === 'patient') {
-      query.patientId = req.user._id;
-    } else if (req.user.role === 'dentist') {
-      query.dentistId = req.user._id;
+    // Handle case where auth is disabled
+    if (req.user) {
+      if (req.user.role === 'patient') {
+        query.patientId = req.user._id;
+      } else if (req.user.role === 'dentist') {
+        query.dentistId = req.user._id;
+      }
     }
 
     if (date) {
@@ -35,7 +38,7 @@ router.get('/', async (req, res) => {
     }
 
     if (status) query.status = status;
-    if (dentistId && req.user.role !== 'dentist') query.dentistId = dentistId;
+    if (dentistId && (!req.user || req.user.role !== 'dentist')) query.dentistId = dentistId;
 
     const appointments = await Appointment.find(query)
       .populate('patientId', 'profile.firstName profile.lastName email phone')
@@ -59,7 +62,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Appointment not found' });
     }
 
-    if (req.user.role === 'patient' && appointment.patientId._id.toString() !== req.user._id.toString()) {
+    if (req.user && req.user.role === 'patient' && appointment.patientId._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -82,7 +85,7 @@ router.post('/', [
   try {
     const appointmentData = {
       ...req.body,
-      patientId: req.user.role === 'patient' ? req.user._id : req.body.patientId
+      patientId: (req.user && req.user.role === 'patient') ? req.user._id : req.body.patientId
     };
 
     const conflictingAppointment = await Appointment.findOne({
@@ -127,7 +130,7 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Appointment not found' });
     }
 
-    if (req.user.role === 'patient' && appointment.patientId.toString() !== req.user._id.toString()) {
+    if (req.user && req.user.role === 'patient' && appointment.patientId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -135,7 +138,7 @@ router.put('/:id', async (req, res) => {
     delete updates._id;
     delete updates.patientId;
     
-    if (req.user.role === 'patient') {
+    if (req.user && req.user.role === 'patient') {
       delete updates.dentistId;
       delete updates.treatment;
       delete updates.billing;
