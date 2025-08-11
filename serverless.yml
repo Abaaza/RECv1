@@ -1,0 +1,359 @@
+service: dental-ai-receptionist
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  environment:
+    NODE_ENV: ${self:provider.stage}
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    DEEPGRAM_API_KEY: ${env:DEEPGRAM_API_KEY}
+    TWILIO_ACCOUNT_SID: ${env:TWILIO_ACCOUNT_SID}
+    TWILIO_AUTH_TOKEN: ${env:TWILIO_AUTH_TOKEN}
+    TWILIO_PHONE_NUMBER: ${env:TWILIO_PHONE_NUMBER}
+    EMAIL_HOST: ${env:EMAIL_HOST}
+    EMAIL_PORT: ${env:EMAIL_PORT}
+    EMAIL_USER: ${env:EMAIL_USER}
+    EMAIL_PASS: ${env:EMAIL_PASS}
+    S3_BUCKET: ${self:custom.s3Bucket}
+    CLOUDFRONT_URL: ${self:custom.cloudfrontUrl}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:*
+          Resource:
+            - arn:aws:s3:::${self:custom.s3Bucket}
+            - arn:aws:s3:::${self:custom.s3Bucket}/*
+        - Effect: Allow
+          Action:
+            - dynamodb:*
+          Resource:
+            - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.stage}-*
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - arn:aws:secretsmanager:${self:provider.region}:*:secret:${self:provider.stage}/*
+
+custom:
+  s3Bucket: dental-ai-${self:provider.stage}-assets
+  cloudfrontUrl: https://d1234567890.cloudfront.net
+  serverless-offline:
+    httpPort: 3000
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules: true
+  prune:
+    automatic: true
+    number: 3
+
+functions:
+  app:
+    handler: dental-ai-receptionist/server/lambda.handler
+    events:
+      - http:
+          path: /
+          method: ANY
+          cors: true
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+    timeout: 30
+    memorySize: 512
+
+  auth:
+    handler: dental-ai-receptionist/server/handlers/auth.handler
+    events:
+      - http:
+          path: /api/auth/{proxy+}
+          method: ANY
+          cors: true
+    timeout: 10
+    memorySize: 256
+
+  appointments:
+    handler: dental-ai-receptionist/server/handlers/appointments.handler
+    events:
+      - http:
+          path: /api/appointments/{proxy+}
+          method: ANY
+          cors: true
+    timeout: 10
+    memorySize: 256
+
+  analytics:
+    handler: dental-ai-receptionist/server/handlers/analytics.handler
+    events:
+      - http:
+          path: /api/analytics/{proxy+}
+          method: ANY
+          cors: true
+    timeout: 15
+    memorySize: 512
+
+  aiAgent:
+    handler: dental-ai-receptionist/server/handlers/ai.handler
+    events:
+      - http:
+          path: /api/ai/{proxy+}
+          method: ANY
+          cors: true
+    timeout: 60
+    memorySize: 1024
+
+  notifications:
+    handler: dental-ai-receptionist/server/handlers/notifications.handler
+    events:
+      - http:
+          path: /api/notifications/{proxy+}
+          method: ANY
+          cors: true
+      - schedule:
+          rate: rate(1 hour)
+          enabled: true
+    timeout: 30
+    memorySize: 256
+
+  scheduler:
+    handler: dental-ai-receptionist/server/handlers/scheduler.handler
+    events:
+      - schedule:
+          rate: cron(0 9 * * ? *)
+          enabled: true
+          description: Daily appointment reminders
+      - schedule:
+          rate: cron(0 18 * * 5 *)
+          enabled: true
+          description: Weekly reports
+    timeout: 60
+    memorySize: 512
+
+  websocket:
+    handler: dental-ai-receptionist/server/handlers/websocket.handler
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+      - websocket:
+          route: $default
+    timeout: 30
+    memorySize: 256
+
+resources:
+  Resources:
+    S3AssetsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.s3Bucket}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders:
+                - "*"
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              AllowedOrigins:
+                - "*"
+              MaxAge: 3000
+
+    CloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Origins:
+            - DomainName: ${self:custom.s3Bucket}.s3.amazonaws.com
+              Id: S3Origin
+              S3OriginConfig:
+                OriginAccessIdentity: ""
+            - DomainName: 
+                Fn::Join:
+                  - ""
+                  - - Ref: ApiGatewayRestApi
+                    - ".execute-api."
+                    - ${self:provider.region}
+                    - ".amazonaws.com"
+              Id: ApiGatewayOrigin
+              CustomOriginConfig:
+                HTTPPort: 80
+                HTTPSPort: 443
+                OriginProtocolPolicy: https-only
+          Enabled: true
+          DefaultRootObject: index.html
+          DefaultCacheBehavior:
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: none
+          CacheBehaviors:
+            - PathPattern: /api/*
+              TargetOriginId: ApiGatewayOrigin
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+                - PUT
+                - POST
+                - PATCH
+                - DELETE
+              ViewerProtocolPolicy: https-only
+              ForwardedValues:
+                QueryString: true
+                Headers:
+                  - Authorization
+                  - Content-Type
+                  - X-Requested-With
+                Cookies:
+                  Forward: all
+          PriceClass: PriceClass_100
+          ViewerCertificate:
+            CloudFrontDefaultCertificate: true
+
+    AppointmentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.stage}-appointments
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: patientId
+            AttributeType: S
+          - AttributeName: date
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: patient-date-index
+            KeySchema:
+              - AttributeName: patientId
+                KeyType: HASH
+              - AttributeName: date
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+        BillingMode: PROVISIONED
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.stage}-users
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: email-index
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+        BillingMode: PROVISIONED
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+
+    WebSocketConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.stage}-ws-connections
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+
+  Outputs:
+    S3BucketName:
+      Description: S3 Bucket for static assets
+      Value:
+        Ref: S3AssetsBucket
+    CloudFrontDistributionId:
+      Description: CloudFront Distribution ID
+      Value:
+        Ref: CloudFrontDistribution
+    CloudFrontURL:
+      Description: CloudFront Distribution URL
+      Value:
+        Fn::GetAtt:
+          - CloudFrontDistribution
+          - DomainName
+    ApiGatewayUrl:
+      Description: API Gateway URL
+      Value:
+        Fn::Join:
+          - ""
+          - - "https://"
+            - Ref: ApiGatewayRestApi
+            - ".execute-api."
+            - ${self:provider.region}
+            - ".amazonaws.com/"
+            - ${self:provider.stage}
+    WebSocketUrl:
+      Description: WebSocket API URL
+      Value:
+        Fn::Join:
+          - ""
+          - - "wss://"
+            - Ref: WebsocketsApi
+            - ".execute-api."
+            - ${self:provider.region}
+            - ".amazonaws.com/"
+            - ${self:provider.stage}
+
+plugins:
+  - serverless-webpack
+  - serverless-offline
+  - serverless-prune-plugin
+  - serverless-dotenv-plugin

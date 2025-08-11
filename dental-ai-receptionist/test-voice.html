@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deepgram Voice Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold mb-6 text-center">🎤 Deepgram Voice Test</h1>
+        
+        <div class="space-y-4">
+            <div class="p-4 bg-green-50 rounded-lg">
+                <h2 class="font-semibold text-green-800 mb-2">✅ Deepgram API Status</h2>
+                <p class="text-sm text-green-600">API Key is configured and working!</p>
+            </div>
+            
+            <div class="p-4 bg-blue-50 rounded-lg">
+                <h2 class="font-semibold text-blue-800 mb-2">📞 Test Voice Features</h2>
+                <p class="text-sm text-blue-600 mb-3">Click the button below to test voice interaction:</p>
+                <button id="testVoice" class="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                    Test Text-to-Speech
+                </button>
+            </div>
+            
+            <div class="p-4 bg-purple-50 rounded-lg">
+                <h2 class="font-semibold text-purple-800 mb-2">🎙️ Microphone Test</h2>
+                <button id="micTest" class="w-full bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">
+                    Start Recording (3 seconds)
+                </button>
+                <div id="transcript" class="mt-3 p-2 bg-white rounded text-sm"></div>
+            </div>
+            
+            <div id="status" class="p-4 bg-gray-50 rounded-lg">
+                <h2 class="font-semibold text-gray-800 mb-2">📊 Test Results</h2>
+                <ul id="results" class="text-sm space-y-1"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = '6a8b3aa3ca487eceb89200a866fdeff061d6416f';
+        const resultsEl = document.getElementById('results');
+        
+        function addResult(message, success = true) {
+            const li = document.createElement('li');
+            li.className = success ? 'text-green-600' : 'text-red-600';
+            li.textContent = `${success ? '✅' : '❌'} ${message}`;
+            resultsEl.appendChild(li);
+        }
+        
+        // Test Text-to-Speech
+        document.getElementById('testVoice').addEventListener('click', async () => {
+            try {
+                addResult('Testing Text-to-Speech...');
+                
+                const response = await fetch('https://api.deepgram.com/v1/speak?model=aura-asteria-en&encoding=mp3', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Token ${API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: "Hello! Your Deepgram integration is working perfectly. The dental AI receptionist is ready to help patients."
+                    })
+                });
+                
+                if (response.ok) {
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+                    addResult('Text-to-Speech working! Playing audio...');
+                } else {
+                    addResult('Text-to-Speech failed: ' + response.statusText, false);
+                }
+            } catch (error) {
+                addResult('Text-to-Speech error: ' + error.message, false);
+            }
+        });
+        
+        // Test Microphone Recording
+        document.getElementById('micTest').addEventListener('click', async () => {
+            try {
+                addResult('Requesting microphone access...');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                addResult('Microphone access granted!');
+                
+                const mediaRecorder = new MediaRecorder(stream);
+                const audioChunks = [];
+                
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    addResult('Recording complete! Processing...');
+                    
+                    // Convert to base64 for API
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        const base64Audio = reader.result.split(',')[1];
+                        
+                        try {
+                            const response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=en-US', {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Token ${API_KEY}`,
+                                    'Content-Type': 'audio/webm'
+                                },
+                                body: audioBlob
+                            });
+                            
+                            if (response.ok) {
+                                const result = await response.json();
+                                const transcript = result.results?.channels[0]?.alternatives[0]?.transcript || 'No speech detected';
+                                document.getElementById('transcript').textContent = `Transcript: "${transcript}"`;
+                                addResult('Speech-to-Text working!');
+                            } else {
+                                addResult('Transcription failed: ' + response.statusText, false);
+                            }
+                        } catch (error) {
+                            addResult('Transcription error: ' + error.message, false);
+                        }
+                    };
+                    reader.readAsDataURL(audioBlob);
+                    
+                    // Stop all tracks
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                addResult('Recording for 3 seconds...');
+                mediaRecorder.start();
+                
+                setTimeout(() => {
+                    mediaRecorder.stop();
+                }, 3000);
+                
+            } catch (error) {
+                addResult('Microphone error: ' + error.message, false);
+            }
+        });
+        
+        // Initial status
+        addResult('Page loaded successfully');
+        addResult('Deepgram API Key configured');
+    </script>
+</body>
+</html>

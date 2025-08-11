@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: dental-ai-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-admin123}
+      MONGO_INITDB_DATABASE: dental_ai
+    volumes:
+      - mongodb_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - dental-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dental-ai-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    networks:
+      - dental-network
+
+  backend:
+    build:
+      context: ./dental-ai-receptionist/server
+      dockerfile: Dockerfile
+    container_name: dental-ai-backend
+    restart: always
+    ports:
+      - "5001:5001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 5001
+      MONGODB_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-admin123}@mongodb:27017/dental_ai?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./dental-ai-receptionist/server:/app
+      - /app/node_modules
+    networks:
+      - dental-network
+
+  frontend:
+    build:
+      context: ./dental-ai-receptionist
+      dockerfile: Dockerfile
+    container_name: dental-ai-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    environment:
+      VITE_API_URL: http://backend:5001/api
+      VITE_WS_URL: ws://backend:5001
+    depends_on:
+      - backend
+    networks:
+      - dental-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: dental-ai-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - dental-network
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  dental-network:
+    driver: bridge

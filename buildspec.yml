@@ -1,0 +1,44 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Installing dependencies...
+      - cd dental-ai-receptionist
+      - npm ci
+      - cd server
+      - npm ci
+      - cd ../..
+      - echo Pre-build phase completed on `date`
+
+  build:
+    commands:
+      - echo Building React application...
+      - cd dental-ai-receptionist
+      - npm run build
+      - echo Building backend...
+      - cd server
+      - npm run build || echo "No build script, skipping..."
+      - cd ../..
+      - echo Build phase completed on `date`
+
+  post_build:
+    commands:
+      - echo Deploying to S3...
+      - aws s3 sync dental-ai-receptionist/dist s3://${S3_BUCKET}/ --delete
+      - echo Invalidating CloudFront cache...
+      - aws cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} --paths "/*"
+      - echo Deploying backend with Serverless...
+      - npm install -g serverless
+      - serverless deploy --stage ${STAGE} --region ${AWS_REGION}
+      - echo Post-build phase completed on `date`
+
+artifacts:
+  files:
+    - '**/*'
+  name: dental-ai-receptionist-${CODEBUILD_BUILD_NUMBER}
+  
+cache:
+  paths:
+    - 'dental-ai-receptionist/node_modules/**/*'
+    - 'dental-ai-receptionist/server/node_modules/**/*'
