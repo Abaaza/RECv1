@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+// Removed framer-motion to fix flashing issues
 import {
   Calendar, Clock, Users, Settings, Plus, Minus,
   Save, RefreshCw, AlertCircle, CheckCircle, XCircle,
@@ -281,16 +281,15 @@ const AdminSchedulePortal = () => {
             const defaultDaySchedule = defaultSchedule[dayName];
 
             return (
-              <motion.div
+              <div
                 key={dateKey}
-                className={`border rounded-lg p-3 cursor-pointer transition-all ${
+                className={`border rounded-lg p-3 cursor-pointer transition-colors hover:shadow-md ${
                   isToday(day) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
                 } ${selectedDate && isSameDay(day, selectedDate) ? 'ring-2 ring-blue-500' : ''}
                 ${isPast(day) && !isToday(day) ? 'opacity-50' : ''}
                 ${isHoliday ? 'bg-red-50' : ''}
                 ${hasSpecialHours ? 'bg-yellow-50' : ''}`}
                 onClick={() => setSelectedDate(day)}
-                whileHover={{ scale: 1.02 }}
               >
                 <div className="text-center mb-2">
                   <p className="text-xs text-gray-500">{format(day, 'EEE')}</p>
@@ -327,7 +326,7 @@ const AdminSchedulePortal = () => {
                     <p className="text-xs text-gray-500">Closed</p>
                   </div>
                 )}
-              </motion.div>
+              </div>
             );
           })}
         </div>
@@ -349,9 +348,7 @@ const AdminSchedulePortal = () => {
                     generateTimeSlots(defaultDaySchedule.start, defaultDaySchedule.end) : []);
 
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="bg-white rounded-lg shadow-lg p-6"
       >
         <div className="flex items-center justify-between mb-6">
@@ -532,11 +529,11 @@ const AdminSchedulePortal = () => {
                   key={slot.time}
                   onClick={() => editMode && toggleSlotAvailability(selectedDate, slot.time)}
                   disabled={!editMode || isPastTime}
-                  className={`p-2 rounded-lg text-sm font-medium transition-all ${
+                  className={`p-2 rounded-lg text-sm font-medium transition-colors ${
                     isBlocked 
                       ? 'bg-red-100 text-red-700 line-through' 
                       : 'bg-green-100 text-green-700'
-                  } ${editMode && !isPastTime ? 'hover:scale-105 cursor-pointer' : 'cursor-default'}
+                  } ${editMode && !isPastTime ? 'hover:opacity-90 cursor-pointer' : 'cursor-default'}
                   ${isPastTime ? 'opacity-50' : ''}`}
                 >
                   {slot.time}
@@ -576,14 +573,12 @@ const AdminSchedulePortal = () => {
             </button>
           </div>
         )}
-      </motion.div>
+      </div>
     );
   };
 
-  const TemplateSettings = React.memo(() => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
+  const TemplateSettings = () => (
+    <div
       className="bg-white rounded-lg shadow-lg p-6"
     >
       <h3 className="text-lg font-semibold mb-4">Default Schedule Template</h3>
@@ -686,8 +681,8 @@ const AdminSchedulePortal = () => {
           Save Template
         </button>
       </div>
-    </motion.div>
-  ));
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -699,10 +694,8 @@ const AdminSchedulePortal = () => {
 
       {/* Status Bar */}
       {saveStatus && (
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`mb-4 p-4 rounded-lg flex items-center ${
+        <div
+          className={`mb-4 p-4 rounded-lg flex items-center transition-opacity ${
             saveStatus === 'saving' ? 'bg-blue-100 text-blue-700' :
             saveStatus === 'saved' ? 'bg-green-100 text-green-700' :
             'bg-red-100 text-red-700'
@@ -716,7 +709,7 @@ const AdminSchedulePortal = () => {
              saveStatus === 'saved' ? 'Changes saved successfully!' :
              'Error saving changes. Please try again.'}
           </span>
-        </motion.div>
+        </div>
       )}
 
       {/* Dentist Filter */}

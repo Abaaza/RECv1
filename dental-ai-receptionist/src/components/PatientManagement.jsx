@@ -5,7 +5,7 @@ import {
   Heart, AlertCircle, Pill, Activity,
   ChevronDown, ChevronUp, Filter, X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+// Removed framer-motion to fix flashing issues
 import apiService from '../services/apiService';
 import { Users } from 'lucide-react';
 
@@ -127,12 +127,8 @@ const PatientManagement = () => {
     });
   }, [patients, searchTerm, filters.status]);
 
-  const PatientCard = React.memo(({ patient }) => (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.2 }}
+  const PatientCard = ({ patient }) => (
+    <div
       className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-6"
     >
       <div className="flex justify-between items-start mb-4">
@@ -193,8 +189,8 @@ const PatientManagement = () => {
           <Edit className="w-4 h-4" />
         </button>
       </div>
-    </motion.div>
-  ));
+    </div>
+  );
 
   const PatientDetailsModal = () => {
     const [activeTab, setActiveTab] = useState('overview');
@@ -202,19 +198,12 @@ const PatientManagement = () => {
     if (!selectedPatient) return null;
 
     return (
-      <AnimatePresence>
-        {showDetailsModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+      {showDetailsModal && (
+          <div
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             onClick={() => setShowDetailsModal(false)}
           >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+            <div
               className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
@@ -431,10 +420,9 @@ const PatientManagement = () => {
                   Edit Patient
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
     );
   };
 
@@ -585,8 +573,7 @@ const PatientManagement = () => {
       <PatientDetailsModal />
 
       {/* Add Patient Modal */}
-      <AnimatePresence>
-        {showAddModal && (
+      {showAddModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -726,10 +713,9 @@ const PatientManagement = () => {
                   </button>
                 </div>
               </form>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
     </div>
   );
 };
