@@ -151,10 +151,39 @@ const PhoneInterface = ({ onCallStatusChange, onConversationUpdate }) => {
                 // Use API service for better AI responses (with OpenAI)
                 const response = await aiApiService.processMessage(text);
                 
+                // Check if it's a trauma case
+                if (response.isTrauma) {
+                  // Add urgent marker to conversation
+                  addToConversation('System', '⚠️ TRAUMA CASE DETECTED', 'alert');
+                  
+                  // If ER referral needed, emphasize urgency
+                  if (response.requiresER) {
+                    addToConversation('Sarah', '🚨 THIS IS A MEDICAL EMERGENCY', 'emergency');
+                  }
+                }
+                
+                // Check if user wants to end the call
+                const messageLower = text.toLowerCase();
+                const isEndingCall = messageLower.includes('bye') || 
+                                     messageLower.includes('goodbye') || 
+                                     messageLower.includes('thank you bye') ||
+                                     messageLower.includes('see you') ||
+                                     messageLower.includes('talk to you later');
+                
                 // Only add response if meaningful
                 if (response.response && response.response.trim()) {
                   // Add AI response to conversation
-                  addToConversation('Sarah', response.response);
+                  const responseType = response.isTrauma ? 'trauma' : 
+                                      response.intent === 'appointment_booking' ? 'appointment' : 
+                                      'message';
+                  addToConversation('Sarah', response.response, responseType);
+                  
+                  // Add instructions if present (for trauma cases)
+                  if (response.instructions && response.instructions.length > 0) {
+                    const instructionText = "Please follow these steps:\n" + 
+                                          response.instructions.map((inst, idx) => `${idx + 1}. ${inst}`).join('\n');
+                    addToConversation('Sarah', instructionText, 'instructions');
+                  }
                   
                   // Convert response to speech and add to queue
                   const audioUrl = await deepgramService.textToSpeech(
@@ -169,10 +198,25 @@ const PhoneInterface = ({ onCallStatusChange, onConversationUpdate }) => {
                   if (!isPlayingRef.current) {
                     playNextAudio();
                   }
+                  
+                  // If appointment was created, show confirmation
+                  if (response.appointment) {
+                    addToConversation('System', 
+                      `✅ Appointment confirmed: ${response.appointment.confirmationNumber}`, 
+                      'confirmation'
+                    );
+                  }
                 }
                 
-                // Resume listening after processing
-                setIsListening(true);
+                // If user said bye, end the call after AI responds
+                if (isEndingCall) {
+                  setTimeout(() => {
+                    handleEndCall();
+                  }, 3000); // Wait 3 seconds for AI to finish speaking
+                } else {
+                  // Resume listening after processing
+                  setIsListening(true);
+                }
               
               // Set silence timer to detect when user stops talking
               silenceTimerRef.current = setTimeout(() => {

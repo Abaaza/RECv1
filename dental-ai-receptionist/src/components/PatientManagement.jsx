@@ -197,8 +197,7 @@ const PatientManagement = () => {
 
     if (!selectedPatient) return null;
 
-    return (
-      {showDetailsModal && (
+    return showDetailsModal ? (
           <div
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             onClick={() => setShowDetailsModal(false)}
@@ -422,8 +421,7 @@ const PatientManagement = () => {
               </div>
             </div>
           </div>
-        )}
-    );
+    ) : null;
   };
 
   const handleAddPatient = async (e) => {
@@ -574,17 +572,11 @@ const PatientManagement = () => {
 
       {/* Add Patient Modal */}
       {showAddModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+          <div
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             onClick={() => setShowAddModal(false)}
           >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+            <div
               className="bg-white rounded-lg max-w-2xl w-full p-6"
               onClick={(e) => e.stopPropagation()}
             >

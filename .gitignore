@@ -1,2 +1,45 @@
+# Environment variables
+.env
+.env.local
+.env.production
+.env.development
+*.env
+
+# Directories
+node_modules/
+dist/
+build/
+coverage/
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
 nul
 dental-ai-receptionist/nul
+*.tmp
+*.temp
+
+# Sensitive data
+*.pem
+*.key
+*.cert
+*.crt
+
+# Test coverage
+coverage/
+*.lcov
+
+# Production builds
+/build
+/dist

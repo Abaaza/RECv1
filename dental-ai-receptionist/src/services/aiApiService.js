@@ -18,8 +18,8 @@ class AIApiService {
         this.conversationHistory = this.conversationHistory.slice(-10);
       }
 
-      // Call the backend AI endpoint
-      const response = await axios.post(`${API_BASE_URL}/ai/chat`, {
+      // Use process-conversation endpoint for intent detection and appointment handling
+      const response = await axios.post(`${API_BASE_URL}/ai/process-conversation`, {
         message,
         context: {
           conversationId: this.conversationId,
@@ -30,16 +30,23 @@ class AIApiService {
       });
 
       // Add AI response to history
+      const responseText = response.data.message || response.data.response;
       this.conversationHistory.push({ 
         role: 'assistant', 
-        content: response.data.response 
+        content: responseText 
       });
 
+      // Check if appointment was created
+      if (response.data.appointment) {
+        console.log('Appointment created:', response.data.appointment);
+      }
+
       return {
-        response: response.data.response,
-        type: response.data.type || 'general',
+        response: responseText,
+        type: response.data.intent || 'general',
         intent: response.data.intent,
-        metadata: response.data.metadata
+        metadata: response.data,
+        appointment: response.data.appointment
       };
     } catch (error) {
       console.error('AI API Error:', error);

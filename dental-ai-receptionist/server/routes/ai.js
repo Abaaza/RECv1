@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { processVoiceCall } from '../services/deepgramService.js';
 import { generateAIResponse } from '../services/openaiService.js';
 import aiAppointmentService from '../services/aiAppointmentService.js';
+import traumaService from '../services/traumaService.js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
@@ -117,6 +118,18 @@ router.post('/emergency-triage', [
 
     const { description, symptoms } = req.body;
     
+    // First check if it's a trauma case
+    const traumaResponse = await traumaService.generateTraumaResponse(
+      `${description}. Symptoms: ${symptoms.join(', ')}`,
+      req.body.patientInfo
+    );
+    
+    if (traumaResponse) {
+      logger.info('Trauma emergency triage completed');
+      return res.json(traumaResponse);
+    }
+    
+    // Fallback to general emergency triage
     const triage = await generateAIResponse(
       `Emergency dental triage: ${description}. Symptoms: ${symptoms.join(', ')}`,
       { type: 'emergency_triage' }
@@ -136,6 +149,53 @@ router.post('/emergency-triage', [
   } catch (error) {
     logger.error('Emergency triage error:', error);
     res.status(500).json({ error: 'Failed to process emergency triage' });
+  }
+});
+
+// New endpoint specifically for trauma cases
+router.post('/trauma-assessment', [
+  body('message').notEmpty().trim(),
+  body('patientInfo').optional()
+], async (req, res) => {
+  try {
+    const { message, patientInfo } = req.body;
+    
+    // Analyze trauma
+    const analysis = traumaService.analyzeTrauma(message);
+    
+    if (!analysis.isTrauma) {
+      return res.json({
+        isTrauma: false,
+        message: "This doesn't appear to be a dental trauma. Please describe your symptoms in more detail."
+      });
+    }
+    
+    // Generate comprehensive trauma response
+    const response = await traumaService.generateTraumaResponse(message, patientInfo);
+    
+    logger.info(`Trauma assessment: ${analysis.scenario?.category || 'unknown'} - Severity: ${analysis.severity}`);
+    
+    res.json(response);
+  } catch (error) {
+    logger.error('Trauma assessment error:', error);
+    res.status(500).json({ error: 'Failed to assess trauma' });
+  }
+});
+
+// Get trauma first aid instructions
+router.get('/trauma-instructions/:type', async (req, res) => {
+  try {
+    const { type } = req.params;
+    const instructions = traumaService.getFirstAidInstructions(type);
+    
+    res.json({
+      type,
+      instructions,
+      followUp: traumaService.getFollowUpInstructions(type)
+    });
+  } catch (error) {
+    logger.error('Failed to get trauma instructions:', error);
+    res.status(500).json({ error: 'Failed to retrieve instructions' });
   }
 });
 
@@ -304,8 +364,32 @@ router.post('/process-conversation', [
     let intent = 'general';
     let result = {};
 
+    // First check for trauma/emergency situations
+    const traumaAnalysis = traumaService.analyzeTrauma(message);
+    if (traumaAnalysis.isTrauma) {
+      intent = 'dental_trauma';
+      
+      // Generate trauma response
+      const traumaResponse = await traumaService.generateTraumaResponse(message, {
+        name: context?.patientName,
+        phone: context?.patientPhone
+      });
+      
+      result = {
+        success: true,
+        message: traumaResponse.message,
+        instructions: traumaResponse.instructions,
+        urgency: traumaResponse.urgency,
+        triage: traumaResponse.triage,
+        appointment: traumaResponse.appointment,
+        requiresER: traumaResponse.triage?.level === 1,
+        isTrauma: true
+      };
+      
+      logger.info(`Trauma case detected: ${traumaAnalysis.scenario?.category || 'general'} - Severity: ${traumaAnalysis.severity}`);
+    }
     // Check for appointment booking intent
-    if (messageLower.includes('appointment') || 
+    else if (messageLower.includes('appointment') || 
         messageLower.includes('book') || 
         messageLower.includes('schedule') ||
         messageLower.includes('available') ||
@@ -319,7 +403,7 @@ router.post('/process-conversation', [
       intent = 'appointment_cancellation';
       result = await aiAppointmentService.cancelAppointmentRequest(message);
     }
-    // Check for emergency
+    // Check for general emergency (non-trauma)
     else if (messageLower.includes('emergency') || 
              messageLower.includes('urgent') ||
              messageLower.includes('severe pain') ||
