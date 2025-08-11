@@ -311,8 +311,10 @@ router.post('/book-appointment', [
     // Process the natural language appointment request
     const result = await aiAppointmentService.processAppointmentRequest(request);
     
-    if (result.success) {
+    if (result.success && result.appointment) {
       logger.info(`AI booked appointment: ${result.appointment.confirmationNumber}`);
+    } else if (result.needsInfo) {
+      logger.info(`AI needs more info for booking: ${result.needsInfo}`);
     } else {
       logger.warn('AI appointment booking failed:', result.message);
     }
@@ -368,6 +370,50 @@ router.post('/process-conversation', [
     // Detect intent
     let intent = 'general';
     let result = {};
+    
+    // Check if this is a follow-up response to a question about name
+    // Look for name patterns or capitalized words that could be names
+    const couldBeName = messageLower.match(/my name is|i'?m |it'?s |call me/) || 
+                       (message.split(' ').some(word => 
+                         word.length > 2 && 
+                         word[0] === word[0].toUpperCase() && 
+                         word[0] !== word[0].toLowerCase() &&
+                         !['I', 'The', 'This', 'That'].includes(word)));
+    
+    // Check if previous message asked for name (from context or history)
+    const previousAskedForName = context?.needsInfo === 'name' || 
+                                 context?.history?.slice(-1)[0]?.response?.includes('name');
+    
+    if (couldBeName && previousAskedForName) {
+      // This is likely a name response to our question, continue with booking
+      intent = 'appointment_booking_continuation';
+      const extractedName = message.replace(/my name is |i'?m |it'?s |call me /gi, '').trim();
+      const fullMessage = `My name is ${extractedName}. I need to book an appointment for tomorrow.`;
+      
+      try {
+        const appointmentResult = await aiAppointmentService.processAppointmentRequest(fullMessage);
+        
+        if (appointmentResult.confirmationNumber) {
+          result = {
+            success: true,
+            message: appointmentResult.message,
+            appointment: appointmentResult.appointment,
+            confirmationNumber: appointmentResult.confirmationNumber
+          };
+        } else {
+          result = {
+            success: true,
+            message: `Thank you ${extractedName}! What type of appointment would you like to book and when would you prefer to come in?`
+          };
+        }
+      } catch (error) {
+        logger.error('Name follow-up booking error:', error);
+        result = {
+          success: true,
+          message: `Thank you ${extractedName}! What type of appointment would you like to book and when would you prefer?`
+        };
+      }
+    }
 
     // First check for trauma/emergency situations
     try {
@@ -407,16 +453,31 @@ router.post('/process-conversation', [
       logger.error('Trauma analysis error:', traumaAnalysisError);
     }
     
-    // Check for appointment booking intent
+    // Check for appointment booking intent or if we're discussing dental issues
     if (!result.message && (messageLower.includes('appointment') || 
         messageLower.includes('book') || 
         messageLower.includes('schedule') ||
         messageLower.includes('available') ||
-        messageLower.includes('slot'))) {
+        messageLower.includes('slot') ||
+        messageLower.includes('tooth') ||
+        messageLower.includes('teeth') ||
+        messageLower.includes('dental') ||
+        messageLower.includes('checkup') ||
+        messageLower.includes('cleaning'))) {
       intent = 'appointment_booking';
       
       try {
         const appointmentResult = await aiAppointmentService.processAppointmentRequest(message);
+        
+        // Check if we need more information
+        if (appointmentResult.needsInfo === 'name') {
+          intent = 'needs_patient_info';
+        }
+        
+        // Check if it's an emergency
+        if (appointmentResult.isEmergency) {
+          intent = 'dental_emergency';
+        }
         
         // Ensure consistent response structure
         result = {
@@ -424,7 +485,9 @@ router.post('/process-conversation', [
           message: ensureValidResponse(appointmentResult.message) || getRandomFallback('appointment_booking'),
           response: appointmentResult.message, // For compatibility
           appointment: appointmentResult.appointment,
-          confirmationNumber: appointmentResult.confirmationNumber
+          confirmationNumber: appointmentResult.confirmationNumber,
+          needsInfo: appointmentResult.needsInfo,
+          isEmergency: appointmentResult.isEmergency
         };
       } catch (appointmentError) {
         logger.error('Appointment booking error:', appointmentError);
@@ -468,18 +531,30 @@ router.post('/process-conversation', [
     // Default to general chat
     else if (!result.message) {
       intent = 'general_chat';
-      try {
-        const aiResponse = await generateAIResponse(message, context);
+      
+      // Check if it's a confusing message that doesn't make sense
+      if (messageLower.includes('knocked my tools') || 
+          messageLower.includes('knocked my doors') ||
+          messageLower.includes('knocked my car')) {
+        // This doesn't make dental sense, ask for clarification
         result = {
           success: true,
-          message: ensureValidResponse(aiResponse) || buildContextualFallback(message, context)
+          message: "I'm sorry, could you repeat that again? If you have a dental issue, please describe what happened to your tooth or teeth."
         };
-      } catch (aiError) {
-        logger.error('AI response error:', aiError);
-        result = {
-          success: true,
-          message: buildContextualFallback(message, context)
-        };
+      } else {
+        try {
+          const aiResponse = await generateAIResponse(message, context);
+          result = {
+            success: true,
+            message: ensureValidResponse(aiResponse) || buildContextualFallback(message, context)
+          };
+        } catch (aiError) {
+          logger.error('AI response error:', aiError);
+          result = {
+            success: true,
+            message: buildContextualFallback(message, context)
+          };
+        }
       }
     }
 
@@ -498,7 +573,9 @@ router.post('/process-conversation', [
       intent,
       ...result,
       success: true,
-      message: ensureValidResponse(result.message)
+      message: ensureValidResponse(result.message),
+      // Include context hint for frontend to track conversation state
+      contextHint: result.needsInfo ? { lastQuestion: result.needsInfo } : null
     });
   } catch (error) {
     logger.error('AI conversation processing error:', error);

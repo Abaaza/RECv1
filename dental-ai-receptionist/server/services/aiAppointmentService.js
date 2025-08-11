@@ -46,10 +46,55 @@ class AIAppointmentService {
         };
       }
 
-      // Find or create patient
-      logger.info('Finding or creating patient:', appointmentDetails.patient);
-      const patient = await this.findOrCreatePatient(appointmentDetails.patient);
-      logger.info(`Patient found/created: ${patient._id} - ${patient.firstName} ${patient.lastName}`);
+      // Log extracted details for debugging
+      logger.info('Extracted patient info:', {
+        hasPatient: !!appointmentDetails.patient,
+        patientName: appointmentDetails.patient?.name,
+        patientNameType: typeof appointmentDetails.patient?.name,
+        patientPhone: appointmentDetails.patient?.phone
+      });
+      
+      // Check if patient name is missing (null, undefined, or empty string)
+      const hasValidName = appointmentDetails.patient?.name && 
+                          appointmentDetails.patient.name.trim() !== '';
+      
+      // Check if it's an emergency first
+      if (appointmentDetails.urgency === 'urgent' || appointmentDetails.type === 'emergency') {
+        // For emergencies, handle differently
+        if (!hasValidName) {
+          logger.info('Emergency but no name provided');
+          return {
+            success: true,
+            message: "I understand this is urgent. Let me help you right away. Could you please tell me your name so I can book an emergency appointment?",
+            needsInfo: 'name',
+            isEmergency: true
+          };
+        }
+      } else if (!hasValidName) {
+        // For regular appointments, ask for name
+        logger.info('No patient name provided, asking for it');
+        return {
+          success: true,
+          message: "I'd be happy to help you book an appointment. Could you please tell me your name?",
+          needsInfo: 'name'
+        };
+      }
+
+      // Try to find or create patient
+      let patient;
+      try {
+        logger.info('Finding or creating patient:', appointmentDetails.patient);
+        patient = await this.findOrCreatePatient(appointmentDetails.patient);
+        logger.info(`Patient found/created: ${patient._id} - ${patient.firstName} ${patient.lastName}`);
+      } catch (patientError) {
+        // If patient creation fails (likely no name), ask for name
+        logger.info('Patient creation failed, likely missing name:', patientError.message);
+        return {
+          success: true,
+          message: "I'd be happy to help you book an appointment. Could you please tell me your name?",
+          needsInfo: 'name'
+        };
+      }
       
       // Find available slots
       logger.info(`Finding available slots for ${appointmentDetails.type} on ${appointmentDetails.preferredDate}`);
@@ -63,12 +108,25 @@ class AIAppointmentService {
       if (availableSlots.length === 0) {
         const suggestions = await this.getSuggestedDates(appointmentDetails.type);
         let suggestionText = '';
+        let baseMessage = '';
+        
+        // Only mention "requested slot" if user actually specified a time
+        if (appointmentDetails.preferredTime || appointmentDetails.preferredDate) {
+          baseMessage = "I don't have availability at that specific time";
+        } else {
+          baseMessage = "Let me find the next available appointment for you";
+        }
+        
         if (suggestions.length > 0) {
           suggestionText = ` I have availability on ${suggestions[0].date} at ${suggestions[0].firstAvailable}.`;
+          baseMessage += `.${suggestionText} Would you like me to book that for you?`;
+        } else {
+          baseMessage += ". Could you try a different date or time?";
         }
+        
         return {
           success: true, // Always return success
-          message: `Let me check for a better time. The requested slot isn't available, but I can help you find another time.${suggestionText} Would you like me to book that instead?`,
+          message: baseMessage,
           suggestions: suggestions
         };
       }
@@ -143,7 +201,21 @@ class AIAppointmentService {
         });
 
         const aiExtracted = JSON.parse(completion.choices[0].message.content);
-        return { ...details, ...aiExtracted };
+        
+        // Map AI fields to our structure
+        if (aiExtracted.patientName) {
+          details.patient.name = aiExtracted.patientName;
+        }
+        if (aiExtracted.patientPhone) {
+          details.patient.phone = aiExtracted.patientPhone;
+        }
+        if (aiExtracted.type) details.type = aiExtracted.type;
+        if (aiExtracted.preferredDate) details.preferredDate = aiExtracted.preferredDate;
+        if (aiExtracted.preferredTime) details.preferredTime = aiExtracted.preferredTime;
+        if (aiExtracted.urgency) details.urgency = aiExtracted.urgency;
+        if (aiExtracted.notes) details.notes = aiExtracted.notes;
+        
+        return details;
       } catch (error) {
         logger.error('OpenAI extraction failed:', error);
       }
@@ -166,17 +238,28 @@ class AIAppointmentService {
         phone: null
       },
       urgency: 'normal',
-      notes: ''
+      notes: '',
+      needsMoreInfo: false
     };
 
     // Extract appointment type with better detection
     const appointmentKeywords = {
-      'knocked': 'emergency',
+      'knocked my tooth': 'emergency',
+      'knocked my teeth': 'emergency',
+      'knocked tooth': 'emergency',
+      'knocked teeth': 'emergency',
+      'knocked out': 'emergency',
+      'tooth': 'emergency',  // Added explicit tooth
+      'teeth': 'emergency',  // Added teeth
       'broken': 'emergency', 
       'hurt': 'emergency',
       'pain': 'emergency',
       'ache': 'emergency',
       'lost': 'emergency',
+      'fell': 'emergency',
+      'hit': 'emergency',
+      'bleeding': 'emergency',
+      'swollen': 'emergency',
       'cleaning': 'cleaning',
       'clean': 'cleaning',
       'checkup': 'checkup',
@@ -194,19 +277,45 @@ class AIAppointmentService {
       'consult': 'consultation'
     };
     
-    for (const [keyword, typeKey] of Object.entries(appointmentKeywords)) {
-      if (text.includes(keyword)) {
-        const appointmentType = this.appointmentTypes[typeKey] || this.appointmentTypes['checkup'];
-        details.type = typeKey;
-        details.duration = appointmentType.duration;
-        break;
+    // Special handling for confusing phrases first
+    if (text.includes('knocked my tools') || text.includes('knocked my doors')) {
+      // This doesn't make medical sense, don't treat as emergency
+      details.type = null;
+      details.needsClarification = true;
+    } else {
+      // Check for multi-word phrases first, then single words
+      // Sort keywords by length (longer phrases first) to match more specific patterns
+      const sortedKeywords = Object.entries(appointmentKeywords)
+        .sort((a, b) => b[0].length - a[0].length);
+        
+      for (const [keyword, typeKey] of sortedKeywords) {
+        if (text.includes(keyword)) {
+          const appointmentType = this.appointmentTypes[typeKey] || this.appointmentTypes['checkup'];
+          details.type = typeKey;
+          details.duration = appointmentType.duration;
+          
+          // If it's an emergency related to teeth/tooth, mark urgency
+          if (typeKey === 'emergency') {
+            details.urgency = 'urgent';
+          }
+          break;
+        }
       }
     }
     
-    // Default to checkup if no type detected
-    if (!details.type) {
+    // If we need clarification, don't default to checkup
+    if (details.needsClarification) {
+      details.type = null;
+      details.needsMoreInfo = true;
+    } else if (!details.type) {
+      // Only default to checkup if we understand the request
       details.type = 'checkup';
       details.duration = this.appointmentTypes['checkup'].duration;
+    }
+    
+    // If no date provided, use tomorrow as default
+    if (!details.preferredDate) {
+      details.preferredDate = format(addMinutes(new Date(), 1440), 'yyyy-MM-dd');
     }
 
     // Extract date patterns
@@ -257,9 +366,7 @@ class AIAppointmentService {
       /i'?m ([a-z]+(?:\s+[a-z]+)?)/i,
       /call me ([a-z]+)/i,
       /it'?s ([a-z]+(?:\s+[a-z]+)?)/i,
-      /([a-z]+(?:\s+[a-z]+)?)\s+speaking/i,
-      // Single names mentioned in context
-      /\b(ahmed|john|jane|mary|david|sarah|michael|lisa|robert|emily|james|jennifer)\b/i
+      /([a-z]+(?:\s+[a-z]+)?)\s+speaking/i
     ];
 
     for (const pattern of namePatterns) {
@@ -277,8 +384,13 @@ class AIAppointmentService {
         // Check if word starts with capital letter (from original request)
         if (word.length > 2 && word[0] === word[0].toUpperCase() && word[0] !== word[0].toLowerCase()) {
           // Skip common words that shouldn't be names
-          const skipWords = ['I', 'The', 'This', 'That', 'Friday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday', 'Sunday', 'Hello', 'Hi', 'Hey', 'Yes', 'No', 'Please', 'Thank', 'Thanks'];
-          if (!skipWords.includes(word) && !word.includes('.') && !word.includes(',')) {
+          const skipWords = [
+            'I', 'The', 'This', 'That', 'Can', 'Could', 'Would', 'Should', 'Will', 'What', 'When', 'Where', 'Why', 'How',
+            'Friday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday', 'Sunday', 
+            'Hello', 'Hi', 'Hey', 'Yes', 'No', 'Please', 'Thank', 'Thanks', 'Book', 'Schedule', 'Need', 'Want',
+            'Have', 'Help', 'Make', 'Get', 'Give', 'Take', 'Find', 'Call', 'Tell', 'Ask', 'Let', 'May'
+          ];
+          if (!skipWords.includes(word) && !word.includes('.') && !word.includes(',') && !word.includes('?')) {
             details.patient.name = word;
             break;
           }
@@ -303,17 +415,17 @@ class AIAppointmentService {
    * Find or create patient record
    */
   async findOrCreatePatient(patientInfo) {
+    // Don't create patient without a name - check for null, undefined, or empty string
+    if (!patientInfo || !patientInfo.name || patientInfo.name.trim() === '') {
+      logger.info('No patient name provided, cannot create patient');
+      throw new Error('Patient name is required for booking');
+    }
+    
     // Generate default phone if not provided
     if (!patientInfo.phone && patientInfo.name) {
       // Generate a temporary phone number for demo/testing
       patientInfo.phone = `555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`;
       logger.info(`Generated temporary phone number for ${patientInfo.name}: ${patientInfo.phone}`);
-    }
-    
-    if (!patientInfo.phone && !patientInfo.name) {
-      // Use guest info if nothing provided
-      patientInfo.name = 'Guest Patient';
-      patientInfo.phone = `555-000-${Math.floor(Math.random() * 9000) + 1000}`;
     }
 
     // Try to find existing patient
